@@ -2,7 +2,6 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import json
 import os
-import random
 import time
 from datetime import datetime, timedelta
 import requests
@@ -19,13 +18,27 @@ ALL_FOREX_PAIRS = [
     'NZD/USD', 'EUR/GBP', 'EUR/JPY', 'GBP/JPY', 'AUD/JPY', 'NZD/JPY'
 ]
 
-# Strategy Implementation Counts (Mocked, Randomized for Demo)
-PAIRS_STRATEGIES = {pair: random.randint(7, 10) for pair in ALL_FOREX_PAIRS}
-TOTAL_STRATEGIES = 10  # Adjust based on actual strategy count
+# --- Fixed Strategy Implementations ---
+PAIRS_STRATEGIES = {
+    'EUR/USD': 9,
+    'GBP/USD': 10,
+    'AUD/USD': 9,
+    'USD/JPY': 8,
+    'USD/CHF': 7,
+    'USD/CAD': 8,
+    'NZD/USD': 8,
+    'EUR/GBP': 9,
+    'EUR/JPY': 8,
+    'GBP/JPY': 8,
+    'AUD/JPY': 7,
+    'NZD/JPY': 7
+}
 
+TOTAL_STRATEGIES = 10  # Adjust based on actual strategy count
 TWELVEDATA_API_KEY = 'd43b61ca625243c99a9273dc13ce4a5d'  # <-- Your TwelveData API Key
 
 # --- Prediction Logic Function ---
+import random
 def predict_next_candle(pair, timeframe, candle_data, previous_candles):
     checklist = {
         "Near Key Level": random.choice([True, False]),
