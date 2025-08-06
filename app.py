@@ -13,34 +13,29 @@ CORS(app)
 # Global Prediction Lock
 prediction_locks = {}
 
-# --- Quotex Forex Pairs with Strategy Implementations ---
+# Full Quotex Forex Pairs with Implemented Strategies Count
 PAIRS_STRATEGIES = {
     'EUR/USD': 9,
-    'GBP/USD': 8,
-    'USD/JPY': 7,
-    'AUD/USD': 8,
+    'GBP/USD': 10,
+    'USD/JPY': 8,
+    'AUD/USD': 9,
     'USD/CAD': 7,
-    'NZD/USD': 9,
-    'EUR/GBP': 8,
-    'USD/CHF': 8,
-    'BTC/USD': 10,
-    'ETH/USD': 9,
-    'LTC/USD': 8,
-    'XAU/USD': 8,
     'EUR/JPY': 9,
-    'GBP/JPY': 8,
-    'AUD/JPY': 8,
-    'EUR/CAD': 8,
-    'GBP/CAD': 7,
+    'EUR/GBP': 8,
+    'NZD/USD': 8,
+    'USD/CHF': 9,
     'CAD/JPY': 8,
-    'NZD/JPY': 8
+    'GBP/JPY': 9,
+    'AUD/JPY': 8,
+    'AUD/NZD': 7
+    # Add more pairs here
 }
 
-TOTAL_STRATEGIES = 10  # Max strategies
+TOTAL_STRATEGIES = 10  # Total strategies implemented in system
 
-TWELVEDATA_API_KEY = 'd43b61ca625243c99a9273dc13ce4a5d'  # <-- Your API Key
+TWELVEDATA_API_KEY = 'd43b61ca625243c99a9273dc13ce4a5d'  # <-- Replace with your API Key
 
-# --- Prediction Logic Function ---
+# Prediction Logic Function
 def predict_next_candle(pair, timeframe, candle_data, previous_candles):
     checklist = {
         "Near Key Level": random.choice([True, False]),
@@ -65,7 +60,7 @@ def predict_next_candle(pair, timeframe, candle_data, previous_candles):
     prediction = random.choice(["CALL", "PUT"])
     return prediction, checklist, checklist_score
 
-# --- Trade Logger ---
+# Trade Logger
 def log_trade_decision(log_entry):
     log_folder = "trade_logs"
     os.makedirs(log_folder, exist_ok=True)
@@ -75,7 +70,7 @@ def log_trade_decision(log_entry):
     with open(log_file, 'w') as f:
         json.dump(log_entry, f, indent=4)
 
-# --- Error Analysis ---
+# Error Analysis
 def analyze_trade_error(log_entry):
     if log_entry['actual_outcome'] != 'LOSS':
         return None
@@ -108,7 +103,7 @@ def analyze_trade_error(log_entry):
 
     return analysis
 
-# --- API Route: Get Eligible Pairs ---
+# API Route: Get Eligible Pairs
 @app.route('/get_pairs', methods=['POST'])
 def get_pairs():
     data = request.json
@@ -116,13 +111,13 @@ def get_pairs():
 
     eligible_pairs = []
     for pair, implemented_strategies in PAIRS_STRATEGIES.items():
-        checklist_score = int((implemented_strategies / TOTAL_STRATEGIES) * 100)
+        checklist_score = (implemented_strategies / TOTAL_STRATEGIES) * 100
         if checklist_score >= 80:
             eligible_pairs.append(pair)
 
     return jsonify({'pairs': eligible_pairs})
 
-# --- API Route: Predict Candle ---
+# API Route: Predict Candle
 @app.route('/predict', methods=['POST'])
 def predict():
     data = request.json
@@ -152,33 +147,10 @@ def predict():
     if elapsed_since_candle_start < 5:
         time.sleep(5 - elapsed_since_candle_start)
 
-    # --- Fetch Live Candle Data ---
-    symbol_map = {
-        'EUR/USD': 'EUR/USD',
-        'GBP/USD': 'GBP/USD',
-        'USD/JPY': 'USD/JPY',
-        'AUD/USD': 'AUD/USD',
-        'USD/CAD': 'USD/CAD',
-        'NZD/USD': 'NZD/USD',
-        'EUR/GBP': 'EUR/GBP',
-        'USD/CHF': 'USD/CHF',
-        'BTC/USD': 'BTC/USD',
-        'ETH/USD': 'ETH/USD',
-        'LTC/USD': 'LTC/USD',
-        'XAU/USD': 'XAU/USD',
-        'EUR/JPY': 'EUR/JPY',
-        'GBP/JPY': 'GBP/JPY',
-        'AUD/JPY': 'AUD/JPY',
-        'EUR/CAD': 'EUR/CAD',
-        'GBP/CAD': 'GBP/CAD',
-        'CAD/JPY': 'CAD/JPY',
-        'NZD/JPY': 'NZD/JPY'
-    }
-
-    symbol = symbol_map.get(pair, pair)
+    # Fetch Live Candle Data
     interval = {'30s': '1min', '1m': '1min', '5m': '5min'}.get(timeframe, '1min')
 
-    url = f'https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize=1&apikey={TWELVEDATA_API_KEY}'
+    url = f'https://api.twelvedata.com/time_series?symbol={pair}&interval={interval}&outputsize=1&apikey={TWELVEDATA_API_KEY}'
     response = requests.get(url)
     candle_data = {}
 
