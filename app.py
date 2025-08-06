@@ -13,41 +13,17 @@ CORS(app)
 # Global Prediction Lock
 prediction_locks = {}
 
-# All Quotex Pairs with implemented strategies (for example)
-PAIRS_STRATEGIES = {
-    'EUR/USD': 8,
-    'GBP/USD': 10,
-    'USD/JPY': 6,
-    'AUD/USD': 9,
-    'USD/CAD': 7,
-    'EUR/GBP': 9,
-    'EUR/JPY': 7,
-    'GBP/JPY': 8,
-    'NZD/USD': 9,
-    'USD/CHF': 6,
-    'USD/TRY': 5,
-    'EUR/TRY': 8,
-    'AUD/JPY': 7,
-    'CAD/JPY': 6,
-    'CHF/JPY': 8,
-    'NZD/JPY': 9,
-    'AUD/CAD': 6,
-    'AUD/CHF': 7,
-    'AUD/NZD': 8,
-    'EUR/AUD': 9,
-    'EUR/CAD': 7,
-    'EUR/CHF': 6,
-    'GBP/AUD': 8,
-    'GBP/CAD': 7,
-    'GBP/CHF': 6,
-    'NZD/CAD': 7,
-    'NZD/CHF': 8,
-    'CAD/CHF': 6
-}
+# --- All Quotex Forex Pairs ---
+ALL_FOREX_PAIRS = [
+    'EUR/USD', 'GBP/USD', 'AUD/USD', 'USD/JPY', 'USD/CHF', 'USD/CAD',
+    'NZD/USD', 'EUR/GBP', 'EUR/JPY', 'GBP/JPY', 'AUD/JPY', 'NZD/JPY'
+]
 
-TOTAL_STRATEGIES = 10  # Adjust this based on your total available strategies
+# Strategy Implementation Counts (Mocked, Randomized for Demo)
+PAIRS_STRATEGIES = {pair: random.randint(7, 10) for pair in ALL_FOREX_PAIRS}
+TOTAL_STRATEGIES = 10  # Adjust based on actual strategy count
 
-TWELVEDATA_API_KEY = 'd43b61ca625243c99a9273dc13ce4a5d'  # Replace with your API Key
+TWELVEDATA_API_KEY = 'd43b61ca625243c99a9273dc13ce4a5d'  # <-- Your TwelveData API Key
 
 # --- Prediction Logic Function ---
 def predict_next_candle(pair, timeframe, candle_data, previous_candles):
@@ -140,6 +116,7 @@ def predict():
     previous_candles = data.get('previous_candles', [])
     actual_outcome = data.get('actual_outcome', None)
 
+    # Candle Locking Logic
     timeframe_seconds = {'30s': 30, '1m': 60, '5m': 300}.get(timeframe, 60)
     current_time = datetime.utcnow()
     candle_start_time = current_time - timedelta(seconds=current_time.second % timeframe_seconds, microseconds=current_time.microsecond)
@@ -155,16 +132,9 @@ def predict():
 
     prediction_locks[lock_key] = candle_lock_expiry
 
-    # Simulate Processing Delay (5 sec)
-    elapsed_since_candle_start = (current_time - candle_start_time).seconds
-    if elapsed_since_candle_start < 5:
-        time.sleep(5 - elapsed_since_candle_start)
-
     # --- Fetch Live Candle Data ---
-    symbol = pair
     interval = {'30s': '1min', '1m': '1min', '5m': '5min'}.get(timeframe, '1min')
-
-    url = f'https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize=1&apikey={TWELVEDATA_API_KEY}'
+    url = f'https://api.twelvedata.com/time_series?symbol={pair}&interval={interval}&outputsize=1&apikey={TWELVEDATA_API_KEY}'
     response = requests.get(url)
     candle_data = {}
 
