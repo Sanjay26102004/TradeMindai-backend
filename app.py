@@ -1,209 +1,107 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import json
-import os
-import time
-from datetime import datetime, timedelta
 import requests
+import random
+import time
 
 app = Flask(__name__)
 CORS(app)
 
-# Global Prediction Lock
-prediction_locks = {}
+# Your TwelveData API key
+TWELVE_DATA_API_KEY = 'd43b61ca625243c99a9273dc13ce4a5d'
 
-# --- All Quotex Forex Pairs ---
-ALL_FOREX_PAIRS = [
-    'EUR/USD', 'GBP/USD', 'AUD/USD', 'USD/JPY', 'USD/CHF', 'USD/CAD',
-    'NZD/USD', 'EUR/GBP', 'EUR/JPY', 'GBP/JPY', 'AUD/JPY', 'NZD/JPY'
+# Simulated full list of Quotex forex pairs
+QUOTEX_FOREX_PAIRS = [
+    "EUR/USD", "GBP/USD", "AUD/USD", "USD/JPY", "USD/CAD", "USD/CHF",
+    "NZD/USD", "EUR/GBP", "EUR/JPY", "GBP/JPY", "AUD/JPY", "CAD/JPY",
+    "CHF/JPY", "EUR/AUD", "GBP/CAD", "AUD/CAD", "NZD/JPY", "EUR/NZD"
 ]
 
-# --- Fixed Strategy Implementations ---
-PAIRS_STRATEGIES = {
-    'EUR/USD': 9,
-    'GBP/USD': 10,
-    'AUD/USD': 9,
-    'USD/JPY': 8,
-    'USD/CHF': 7,
-    'USD/CAD': 8,
-    'NZD/USD': 8,
-    'EUR/GBP': 9,
-    'EUR/JPY': 8,
-    'GBP/JPY': 8,
-    'AUD/JPY': 7,
-    'NZD/JPY': 7
-}
+# Prediction lock system to prevent multiple predictions in same candle
+last_prediction_time = {}
+prediction_lock_seconds = 60  # Adjust per timeframe
 
-TOTAL_STRATEGIES = 10  # Adjust based on actual strategy count
-TWELVEDATA_API_KEY = 'd43b61ca625243c99a9273dc13ce4a5d'  # <-- Your TwelveData API Key
+def fetch_latest_candle(pair, timeframe):
+    symbol = pair.replace("/", "")
+    interval = timeframe
+    url = f'https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&apikey={TWELVE_DATA_API_KEY}&outputsize=2'
+    response = requests.get(url)
+    data = response.json()
+    if 'values' in data:
+        return data['values'][0]  # latest candle
+    return None
 
-# --- Prediction Logic Function ---
-import random
-def predict_next_candle(pair, timeframe, candle_data, previous_candles):
-    checklist = {
-        "Near Key Level": random.choice([True, False]),
-        "Domination Candle": random.choice([True, False]),
-        "Exhaustion Candle": random.choice([True, False]),
-        "Saturation Zone": random.choice([True, False]),
-        "RSI Valid": random.choice([True, False]),
-        "Volume Spike": random.choice([True, False]),
-        "Wick Rejection": random.choice([True, False]),
-        "Fake Breakout Trap": random.choice([True, False]),
-        "Domination After Trap": random.choice([True, False]),
-        "Range Rejection": random.choice([True, False]),
-        "Clean Breakout": random.choice([True, False]),
-        "Microstructure Confirmed": random.choice([True, False])
-    }
-
-    checklist_score = (sum(checklist.values()) / len(checklist)) * 100
-
-    if checklist_score < 80:
-        return None, checklist, checklist_score
-
-    prediction = random.choice(["CALL", "PUT"])
-    return prediction, checklist, checklist_score
-
-# --- Trade Logger ---
-def log_trade_decision(log_entry):
-    log_folder = "trade_logs"
-    os.makedirs(log_folder, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    log_file = os.path.join(log_folder, f"trade_{timestamp}.json")
-
-    with open(log_file, 'w') as f:
-        json.dump(log_entry, f, indent=4)
-
-# --- Error Analysis ---
-def analyze_trade_error(log_entry):
-    if log_entry['actual_outcome'] != 'LOSS':
-        return None
-
-    failed_conditions = [key for key, value in log_entry['checklist'].items() if not value]
-    passed_conditions = [key for key, value in log_entry['checklist'].items() if value]
-
-    analysis = {
-        "failed_conditions": failed_conditions,
-        "passed_conditions": passed_conditions,
-        "primary_reason": None,
-        "suggestions": []
-    }
-
-    if 'Volume Spike' in failed_conditions or 'Microstructure Confirmed' in failed_conditions:
-        analysis['primary_reason'] = 'Weak Internal Strength (Volume/Volatility Missing)'
-        analysis['suggestions'].append('Ensure Volume Confirmation is prioritized in volatile markets.')
-
-    if 'Wick Rejection' in failed_conditions and 'Near Key Level' in passed_conditions:
-        analysis['primary_reason'] = 'False Key Level Rejection'
-        analysis['suggestions'].append('Consider tightening wick ratio filter.')
-
-    if 'RSI Valid' in failed_conditions:
-        analysis['primary_reason'] = 'RSI Filter Ignored'
-        analysis['suggestions'].append('Recheck RSI thresholds in ranging markets.')
-
-    if not analysis['primary_reason']:
-        analysis['primary_reason'] = 'Market Noise or External Factor'
-        analysis['suggestions'].append('Check economic calendar for news events.')
-
-    return analysis
-
-# --- API Route: Get Eligible Pairs ---
 @app.route('/get_pairs', methods=['POST'])
 def get_pairs():
-    data = request.json
-    timeframe = data.get('timeframe', '')
+    data = request.get_json()
+    timeframe = data.get('timeframe')
 
     eligible_pairs = []
-    for pair, implemented_strategies in PAIRS_STRATEGIES.items():
-        checklist_score = int((implemented_strategies / TOTAL_STRATEGIES) * 100)
+    for pair in QUOTEX_FOREX_PAIRS:
+        checklist_score = random.randint(75, 100)  # Simulate
         if checklist_score >= 80:
             eligible_pairs.append(pair)
 
     return jsonify({'pairs': eligible_pairs})
 
-# --- API Route: Predict Candle ---
 @app.route('/predict', methods=['POST'])
 def predict():
-    data = request.json
+    global last_prediction_time
+
+    data = request.get_json()
     pair = data.get('pair')
     timeframe = data.get('timeframe')
-    previous_candles = data.get('previous_candles', [])
-    actual_outcome = data.get('actual_outcome', None)
 
-    # Candle Locking Logic
-    timeframe_seconds = {'30s': 30, '1m': 60, '5m': 300}.get(timeframe, 60)
-    current_time = datetime.utcnow()
-    candle_start_time = current_time - timedelta(seconds=current_time.second % timeframe_seconds, microseconds=current_time.microsecond)
-    candle_lock_expiry = candle_start_time + timedelta(seconds=timeframe_seconds)
-    lock_key = f"{pair}_{timeframe}"
+    now = time.time()
+    key = f"{pair}_{timeframe}"
+    if key in last_prediction_time:
+        elapsed = now - last_prediction_time[key]
+        if elapsed < prediction_lock_seconds:
+            return jsonify({
+                'status': 'locked',
+                'lockDuration': int(prediction_lock_seconds - elapsed)
+            })
 
-    if lock_key in prediction_locks and prediction_locks[lock_key] > current_time:
-        return jsonify({
-            'status': 'locked',
-            'message': 'Prediction already made for this candle.',
-            'lockDuration': (prediction_locks[lock_key] - current_time).seconds
-        })
+    candle = fetch_latest_candle(pair, timeframe)
+    if not candle:
+        return jsonify({'status': 'no_trade', 'message': 'Live candle not available'})
 
-    prediction_locks[lock_key] = candle_lock_expiry
-
-    # --- Fetch Live Candle Data ---
-    interval = {'30s': '1min', '1m': '1min', '5m': '5min'}.get(timeframe, '1min')
-    url = f'https://api.twelvedata.com/time_series?symbol={pair}&interval={interval}&outputsize=1&apikey={TWELVEDATA_API_KEY}'
-    response = requests.get(url)
-    candle_data = {}
-
-    if response.status_code == 200:
-        json_data = response.json()
-        if 'values' in json_data and len(json_data['values']) > 0:
-            latest_candle = json_data['values'][0]
-            candle_data = {
-                "open": float(latest_candle['open']),
-                "high": float(latest_candle['high']),
-                "low": float(latest_candle['low']),
-                "close": float(latest_candle['close']),
-                "volume": float(latest_candle['volume'])
-            }
-    else:
-        return jsonify({"status": "error", "message": "Failed to fetch live candle data."})
-
-    # Run Prediction Logic
-    prediction, checklist, checklist_score = predict_next_candle(pair, timeframe, candle_data, previous_candles)
-
-    if not prediction:
-        return jsonify({
-            "status": "no_trade",
-            "message": "Checklist accuracy below 80%.",
-            "checklist_score": checklist_score,
-            "checklist": checklist
-        })
-
-    log_entry = {
-        "timestamp": current_time.isoformat(),
-        "pair": pair,
-        "timeframe": timeframe,
-        "candle_data": candle_data,
-        "previous_candles": previous_candles,
-        "prediction": prediction,
-        "checklist": checklist,
-        "checklist_score": checklist_score,
-        "actual_outcome": actual_outcome
+    # Simulated prediction logic
+    prediction = random.choice(['CALL', 'PUT'])
+    checklist = {
+        "Wick Rejection at S/R": random.choice([True, False]),
+        "Candle Body Strength": random.choice([True, False]),
+        "Volume Confirmation": random.choice([True, False]),
+        "Domination Confirmation": random.choice([True, False])
     }
 
-    log_trade_decision(log_entry)
+    score = (sum(checklist.values()) / len(checklist)) * 100
 
-    error_analysis = analyze_trade_error(log_entry) if actual_outcome == 'LOSS' else None
+    error_analysis = None
+    if score < 80:
+        error_analysis = {
+            "primary_reason": "Strategy conditions not fully met",
+            "suggestions": [
+                "Wait for stronger rejection candle",
+                "Confirm with volume spike",
+                "Ensure domination confirmation is present"
+            ]
+        }
+
+    last_prediction_time[key] = now
 
     return jsonify({
-        "status": "success",
-        "prediction": prediction,
-        "checklist": checklist,
-        "checklist_score": checklist_score,
-        "error_analysis": error_analysis,
-        "lockDuration": (candle_lock_expiry - current_time).seconds
+        'status': 'ok',
+        'prediction': prediction,
+        'checklist': checklist,
+        'checklist_score': score,
+        'error_analysis': error_analysis
     })
 
 @app.route('/')
 def home():
-    return "TradeMind AI Backend is Live!"
+    return "TradeMind AI Backend is Live"
 
 if __name__ == '__main__':
     app.run(debug=True)
+
