@@ -1,36 +1,27 @@
-from flask import Flask, jsonify, request
-import requests
+from flask import Flask, request, jsonify
 from datetime import datetime
 import pytz
 
 app = Flask(__name__)
 
-# All Quotex Forex pairs
+# Placeholder list of pairs (add more as needed)
 ALL_PAIRS = [
-    "EUR/USD", "GBP/USD", "CHF/JPY", "USD/JPY", "CAD/JPY", "AUD/USD", "NDZ/USD",
-    "EUR/GBP", "GBP/CHF", "USD/CHF", "CAD/CHF", "AUD/CHF", "NZD/CHF",
-    "EUR/CHF", "GBP/JPY", "USD/CAD", "AUD/JPY", "NZD/JPY", "EUR/JPY",
-    "GBP/CAD", "AUD/NZD"
+    "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "NZD/USD", "USD/CAD",
+    "USD/CHF", "EUR/JPY", "GBP/JPY", "AUD/JPY", "NZD/JPY", "CAD/JPY",
+    "CHF/JPY", "EUR/GBP", "EUR/CHF", "GBP/CHF", "CAD/CHF", "AUD/CHF",
+    "NZD/CHF", "GBP/CAD", "AUD/NZD"
 ]
 
-# Example strategy checklist (replace with real logic later)
+# Placeholder function to simulate strategy score
 def get_strategy_score(pair, timeframe):
-    # Dummy score generation logic (replace with real one)
-    score = hash(pair + timeframe) % 100
-    return score
+    # Simulate score with hash for stable dummy output
+    return abs(hash(pair + timeframe)) % 100
 
-# Simulate prediction logic
-def make_prediction(pair, timeframe):
-    current_time = datetime.now(pytz.timezone("UTC"))
-    minute = current_time.minute
-    if minute % 2 == 0:
-        return "CALL"
-    else:
-        return "PUT"
-
+# Placeholder function to simulate error analysis
 def analyze_error(pair, timeframe):
-    return f"The market structure for {pair} on {timeframe} may not match the expected wick exhaustion or domination."
+    return f"Strategy failed due to low momentum or weak wick structure on {pair} ({timeframe})"
 
+# ✅ GET route for eligible pairs
 @app.route("/get_pairs", methods=["GET"])
 def get_pairs():
     timeframe = request.args.get("timeframe", "1m")
@@ -38,11 +29,12 @@ def get_pairs():
 
     for pair in ALL_PAIRS:
         score = get_strategy_score(pair, timeframe)
-        if score >= 60:  # Eligibility 60%
+        if score >= 60:  # 60% threshold
             eligible_pairs.append(pair)
 
     return jsonify({"pairs": eligible_pairs})
 
+# ✅ GET route for prediction (URL usage)
 @app.route("/get_prediction", methods=["GET"])
 def get_prediction():
     pair = request.args.get("pair")
@@ -56,19 +48,45 @@ def get_prediction():
             "error_analysis": analyze_error(pair, timeframe)
         })
 
-    prediction = make_prediction(pair, timeframe)
+    prediction = "CALL" if score % 2 == 0 else "PUT"
 
     return jsonify({
-        "pair": pair,
-        "timeframe": timeframe,
         "prediction": prediction,
         "score": score,
-        "error_analysis": "" if prediction else analyze_error(pair, timeframe)
+        "error_analysis": ""
     })
 
+# ✅ POST route for prediction (JSON body usage)
+@app.route("/predict", methods=["POST"])
+def predict():
+    data = request.get_json()
+    pair = data.get("pair")
+    timeframe = data.get("timeframe", "1m")
+
+    if not pair:
+        return jsonify({"error": "Missing 'pair' in request"}), 400
+
+    score = get_strategy_score(pair, timeframe)
+
+    if score < 60:
+        return jsonify({
+            "prediction": "Not eligible",
+            "score": score,
+            "error_analysis": analyze_error(pair, timeframe)
+        })
+
+    prediction = "CALL" if score % 2 == 0 else "PUT"
+
+    return jsonify({
+        "prediction": prediction,
+        "score": score,
+        "error_analysis": ""
+    })
+
+# 🟢 Root route to test server is alive
 @app.route("/", methods=["GET"])
-def home():
-    return jsonify({"message": "TradeMind AI Backend is live!"})
+def index():
+    return jsonify({"status": "TradeMind AI backend is live!"})
 
 if __name__ == "__main__":
     app.run(debug=True)
