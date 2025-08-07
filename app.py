@@ -1,108 +1,75 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+from flask import Flask, jsonify, request
 import requests
-import datetime
+from datetime import datetime
+import pytz
 
 app = Flask(__name__)
-CORS(app)
 
-TWELVE_DATA_API_KEY = "d43b61ca625243c99a9273dc13ce4a5d"  # Replace with your actual API key
-
-# Full list of Quotex Forex pairs
-QUOTEX_FOREX_PAIRS = [
-    "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD",
-    "EUR/JPY", "GBP/JPY", "NZD/USD", "USD/CHF", "EUR/GBP",
-    "EUR/AUD", "AUD/JPY", "GBP/CAD", "CHF/JPY", "EUR/NZD",
-    "NZD/JPY", "CAD/CHF", "AUD/CHF", "GBP/NZD", "NZD/CAD"
+# All Quotex Forex pairs
+ALL_PAIRS = [
+    "EUR/USD", "GBP/USD", "CHF/JPY", "USD/JPY", "CAD/JPY", "AUD/USD", "NDZ/USD",
+    "EUR/GBP", "GBP/CHF", "USD/CHF", "CAD/CHF", "AUD/CHF", "NZD/CHF",
+    "EUR/CHF", "GBP/JPY", "USD/CAD", "AUD/JPY", "NZD/JPY", "EUR/JPY",
+    "GBP/CAD", "AUD/NZD"
 ]
 
-def fetch_latest_candle(pair, timeframe):
-    symbol = pair.replace("/", "")
-    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={timeframe}&outputsize=2&apikey={TWELVE_DATA_API_KEY}"
-    response = requests.get(url)
-    data = response.json()
-    if "values" in data:
-        return data["values"][0]  # Most recent closed candle
-    return None
+# Example strategy checklist (replace with real logic later)
+def get_strategy_score(pair, timeframe):
+    # Dummy score generation logic (replace with real one)
+    score = hash(pair + timeframe) % 100
+    return score
 
-def evaluate_strategy(candle):
-    try:
-        open_price = float(candle['open'])
-        close_price = float(candle['close'])
-        high = float(candle['high'])
-        low = float(candle['low'])
+# Simulate prediction logic
+def make_prediction(pair, timeframe):
+    current_time = datetime.now(pytz.timezone("UTC"))
+    minute = current_time.minute
+    if minute % 2 == 0:
+        return "CALL"
+    else:
+        return "PUT"
 
-        body = abs(close_price - open_price)
-        wick_top = high - max(open_price, close_price)
-        wick_bottom = min(open_price, close_price) - low
+def analyze_error(pair, timeframe):
+    return f"The market structure for {pair} on {timeframe} may not match the expected wick exhaustion or domination."
 
-        score = 0
-
-        # Basic candle psychology rules
-        if body > wick_top and body > wick_bottom:
-            score += 30
-        if wick_bottom > body:
-            score += 20
-        if wick_top > body:
-            score += 20
-        if body > 0.5 * (high - low):
-            score += 20
-        if abs(open_price - close_price) / open_price < 0.005:
-            score += 10  # small body = indecision
-
-        return score
-    except:
-        return 0
-
-@app.route('/')
-def index():
-    return "TradeMind AI Backend Running"
-
-@app.route('/get_pairs', methods=['POST'])
-def get_eligible_pairs():
-    content = request.get_json()
-    timeframe = content.get("timeframe", "1m")
-
+@app.route("/get_pairs", methods=["GET"])
+def get_pairs():
+    timeframe = request.args.get("timeframe", "1m")
     eligible_pairs = []
-    for pair in QUOTEX_FOREX_PAIRS:
-        candle = fetch_latest_candle(pair, timeframe)
-        if candle:
-            score = evaluate_strategy(candle)
-            if score >= 70:
-                eligible_pairs.append(pair)
+
+    for pair in ALL_PAIRS:
+        score = get_strategy_score(pair, timeframe)
+        if score >= 60:  # Eligibility 60%
+            eligible_pairs.append(pair)
 
     return jsonify({"pairs": eligible_pairs})
 
-@app.route('/predict', methods=['POST'])
-def predict():
-    content = request.get_json()
-    pair = content.get("pair")
-    timeframe = content.get("timeframe", "1m")
+@app.route("/get_prediction", methods=["GET"])
+def get_prediction():
+    pair = request.args.get("pair")
+    timeframe = request.args.get("timeframe", "1m")
+    score = get_strategy_score(pair, timeframe)
 
-    candle = fetch_latest_candle(pair, timeframe)
-    if not candle:
-        return jsonify({"error": "Candle data not available"})
-
-    score = evaluate_strategy(candle)
-    direction = "CALL" if float(candle['close']) > float(candle['open']) else "PUT"
-
-    if score >= 70:
+    if score < 60:
         return jsonify({
-            "pair": pair,
-            "timeframe": timeframe,
-            "prediction": direction,
+            "prediction": "Not eligible",
             "score": score,
-            "status": "Eligible"
-        })
-    else:
-        return jsonify({
-            "pair": pair,
-            "timeframe": timeframe,
-            "prediction": direction,
-            "score": score,
-            "status": "Not Eligible"
+            "error_analysis": analyze_error(pair, timeframe)
         })
 
-if __name__ == '__main__':
+    prediction = make_prediction(pair, timeframe)
+
+    return jsonify({
+        "pair": pair,
+        "timeframe": timeframe,
+        "prediction": prediction,
+        "score": score,
+        "error_analysis": "" if prediction else analyze_error(pair, timeframe)
+    })
+
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"message": "TradeMind AI Backend is live!"})
+
+if __name__ == "__main__":
     app.run(debug=True)
 
