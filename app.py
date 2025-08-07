@@ -1,172 +1,108 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import json
-import os
-import random
-import time
-from datetime import datetime, timedelta
+import requests
+import datetime
 
 app = Flask(__name__)
 CORS(app)
 
-prediction_locks = {}
+TWELVE_DATA_API_KEY = "d43b61ca625243c99a9273dc13ce4a5d"  # Replace with your actual API key
 
-# FULL LIST OF QUOTEX FOREX PAIRS (you can expand this list further)
-ALL_PAIRS = [
-    'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD',
-    'NZD/USD', 'EUR/GBP', 'EUR/JPY', 'GBP/JPY', 'USD/CHF'
+# Full list of Quotex Forex pairs
+QUOTEX_FOREX_PAIRS = [
+    "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD",
+    "EUR/JPY", "GBP/JPY", "NZD/USD", "USD/CHF", "EUR/GBP",
+    "EUR/AUD", "AUD/JPY", "GBP/CAD", "CHF/JPY", "EUR/NZD",
+    "NZD/JPY", "CAD/CHF", "AUD/CHF", "GBP/NZD", "NZD/CAD"
 ]
 
-# STRATEGY IMPLEMENTATION SCORE FOR EACH PAIR (0–10 out of 10)
-PAIRS_STRATEGIES = {
-    'EUR/USD': 9,
-    'GBP/USD': 10,
-    'USD/JPY': 8,
-    'AUD/USD': 9,
-    'USD/CAD': 8,
-    'NZD/USD': 6,
-    'EUR/GBP': 7,
-    'EUR/JPY': 9,
-    'GBP/JPY': 8,
-    'USD/CHF': 6
-}
+def fetch_latest_candle(pair, timeframe):
+    symbol = pair.replace("/", "")
+    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={timeframe}&outputsize=2&apikey={TWELVE_DATA_API_KEY}"
+    response = requests.get(url)
+    data = response.json()
+    if "values" in data:
+        return data["values"][0]  # Most recent closed candle
+    return None
 
-TOTAL_STRATEGIES = 10
+def evaluate_strategy(candle):
+    try:
+        open_price = float(candle['open'])
+        close_price = float(candle['close'])
+        high = float(candle['high'])
+        low = float(candle['low'])
 
-def predict_next_candle(pair, timeframe, candle_data, previous_candles):
-    checklist = {
-        "Near Key Level": random.choice([True, False]),
-        "Domination Candle": random.choice([True, False]),
-        "Exhaustion Candle": random.choice([True, False]),
-        "Saturation Zone": random.choice([True, False]),
-        "RSI Valid": random.choice([True, False]),
-        "Volume Spike": random.choice([True, False]),
-        "Wick Rejection": random.choice([True, False]),
-        "Fake Breakout Trap": random.choice([True, False]),
-        "Domination After Trap": random.choice([True, False]),
-        "Range Rejection": random.choice([True, False]),
-        "Clean Breakout": random.choice([True, False]),
-        "Microstructure Confirmed": random.choice([True, False])
-    }
+        body = abs(close_price - open_price)
+        wick_top = high - max(open_price, close_price)
+        wick_bottom = min(open_price, close_price) - low
 
-    checklist_score = (sum(checklist.values()) / len(checklist)) * 100
+        score = 0
 
-    if checklist_score < 80:
-        return None, checklist, checklist_score
+        # Basic candle psychology rules
+        if body > wick_top and body > wick_bottom:
+            score += 30
+        if wick_bottom > body:
+            score += 20
+        if wick_top > body:
+            score += 20
+        if body > 0.5 * (high - low):
+            score += 20
+        if abs(open_price - close_price) / open_price < 0.005:
+            score += 10  # small body = indecision
 
-    prediction = random.choice(["CALL", "PUT"])
-    return prediction, checklist, checklist_score
+        return score
+    except:
+        return 0
+
+@app.route('/')
+def index():
+    return "TradeMind AI Backend Running"
 
 @app.route('/get_pairs', methods=['POST'])
-def get_pairs():
-    data = request.json
-    timeframe = data.get('timeframe', '')
+def get_eligible_pairs():
+    content = request.get_json()
+    timeframe = content.get("timeframe", "1m")
 
     eligible_pairs = []
-    for pair in ALL_PAIRS:
-        implemented = PAIRS_STRATEGIES.get(pair, 0)
-        score = int((implemented / TOTAL_STRATEGIES) * 100)
-        if score >= 80:
-            eligible_pairs.append(pair)
+    for pair in QUOTEX_FOREX_PAIRS:
+        candle = fetch_latest_candle(pair, timeframe)
+        if candle:
+            score = evaluate_strategy(candle)
+            if score >= 70:
+                eligible_pairs.append(pair)
 
-    return jsonify({'pairs': eligible_pairs})
+    return jsonify({"pairs": eligible_pairs})
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    data = request.json
-    pair = data.get('pair')
-    timeframe = data.get('timeframe')
-    candle_data = data.get('candle_data', {})
-    previous_candles = data.get('previous_candles', [])
-    actual_outcome = data.get('actual_outcome', None)
+    content = request.get_json()
+    pair = content.get("pair")
+    timeframe = content.get("timeframe", "1m")
 
-    timeframe_seconds = {'30s': 30, '1m': 60, '5m': 300}.get(timeframe, 60)
-    current_time = datetime.utcnow()
-    candle_start_time = current_time - timedelta(seconds=current_time.second % timeframe_seconds, microseconds=current_time.microsecond)
-    candle_lock_expiry = candle_start_time + timedelta(seconds=timeframe_seconds)
-    lock_key = f"{pair}_{timeframe}"
+    candle = fetch_latest_candle(pair, timeframe)
+    if not candle:
+        return jsonify({"error": "Candle data not available"})
 
-    if lock_key in prediction_locks and prediction_locks[lock_key] > current_time:
+    score = evaluate_strategy(candle)
+    direction = "CALL" if float(candle['close']) > float(candle['open']) else "PUT"
+
+    if score >= 70:
         return jsonify({
-            'status': 'locked',
-            'message': 'Prediction already made for this candle.',
-            'lockDuration': (prediction_locks[lock_key] - current_time).seconds
+            "pair": pair,
+            "timeframe": timeframe,
+            "prediction": direction,
+            "score": score,
+            "status": "Eligible"
         })
-
-    prediction_locks[lock_key] = candle_lock_expiry
-
-    elapsed = (current_time - candle_start_time).seconds
-    if elapsed < 5:
-        time.sleep(5 - elapsed)
-
-    prediction, checklist, checklist_score = predict_next_candle(pair, timeframe, candle_data, previous_candles)
-
-    if not prediction:
+    else:
         return jsonify({
-            "status": "no_trade",
-            "message": "Checklist accuracy below 80%.",
-            "checklist_score": checklist_score,
-            "checklist": checklist
+            "pair": pair,
+            "timeframe": timeframe,
+            "prediction": direction,
+            "score": score,
+            "status": "Not Eligible"
         })
-
-    log_entry = {
-        "timestamp": current_time.isoformat(),
-        "pair": pair,
-        "timeframe": timeframe,
-        "candle_data": candle_data,
-        "previous_candles": previous_candles,
-        "prediction": prediction,
-        "checklist": checklist,
-        "checklist_score": checklist_score,
-        "actual_outcome": actual_outcome
-    }
-
-    error_analysis = analyze_trade_error(log_entry) if actual_outcome == 'LOSS' else None
-
-    return jsonify({
-        "status": "success",
-        "prediction": prediction,
-        "checklist": checklist,
-        "checklist_score": checklist_score,
-        "error_analysis": error_analysis,
-        "lockDuration": (candle_lock_expiry - current_time).seconds
-    })
-
-def analyze_trade_error(log_entry):
-    if log_entry['actual_outcome'] != 'LOSS':
-        return None
-
-    failed_conditions = [k for k, v in log_entry['checklist'].items() if not v]
-    passed_conditions = [k for k, v in log_entry['checklist'].items() if v]
-
-    analysis = {
-        "failed_conditions": failed_conditions,
-        "passed_conditions": passed_conditions,
-        "primary_reason": None,
-        "suggestions": []
-    }
-
-    if 'Volume Spike' in failed_conditions or 'Microstructure Confirmed' in failed_conditions:
-        analysis['primary_reason'] = 'Weak Internal Strength (Volume/Volatility Missing)'
-        analysis['suggestions'].append('Ensure Volume Confirmation is prioritized.')
-
-    if 'Wick Rejection' in failed_conditions and 'Near Key Level' in passed_conditions:
-        analysis['primary_reason'] = 'False Key Level Rejection'
-        analysis['suggestions'].append('Use stricter wick filters.')
-
-    if 'RSI Valid' in failed_conditions:
-        analysis['primary_reason'] = 'RSI Ignored'
-        analysis['suggestions'].append('Check RSI level in range market.')
-
-    if not analysis['primary_reason']:
-        analysis['primary_reason'] = 'Market Noise or Unknown'
-        analysis['suggestions'].append('Check economic news or spread widening.')
-
-    return analysis
-
-@app.route('/')
-def home():
-    return "✅ TradeMind AI Backend is Live!"
 
 if __name__ == '__main__':
     app.run(debug=True)
+
